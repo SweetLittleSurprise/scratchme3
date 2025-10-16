@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scratch Heart — фон + текст след изтриване</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@400;700&family=Lobster&family=Marck+Script&display=swap" rel="stylesheet">
+
+<style>
+  :root{ --card-w:min(480px,92vw); }
+  body{
+    margin:0; min-height:100vh; display:grid; place-items:center;
+    background:#ffe4ec; font-family:"Comfortaa",system-ui,Segoe UI,Roboto,Arial;
+  }
+  .wrap{
+    width:var(--card-w); border-radius:22px; overflow:hidden;
+    background:#ffd1e1; box-shadow:0 12px 36px rgba(0,0,0,.14);
+  }
+  .card{
+    position:relative; aspect-ratio:9/16; padding:22px;
+    display:grid; grid-template-rows:auto auto 1fr auto auto; /* headline, heart, spacer, text, buttons */
+    background-size:cover; background-position:center; background-repeat:no-repeat; /* REVEAL като фон */
+  }
+
+  .headline{text-align:center}
+  .headline h1{ margin:0; font-size:clamp(22px,5.5vw,30px); font-family:"Lobster","Comfortaa",cursive; letter-spacing:.3px }
+  .headline small{ opacity:.7; letter-spacing:.12em }
+
+  .heartBox{ position:relative; width:min(300%,500px); aspect-ratio:1/1; margin:auto 0; }
+  canvas#heart {
+   transform: translate(-5%, 6%);
+}
+  /* Скреч слой – златното сърце */
+  canvas#heart{
+    position:absolute; inset:0; width:100%; height:100%; z-index:2;
+    touch-action:none; cursor:grab; transition:opacity .45s ease; image-rendering:auto;
+  }
+
+  /* Текстът се показва ДОЛУ след reveal */
+  .revealText{
+    text-align:center; opacity:0; transform:translateY(6px);
+    transition:opacity .35s ease, transform .35s ease;
+    margin-top:6px;
+  }
+  .revealText.show{ opacity:1; transform:none; }
+  .revealText h2{ margin:.15rem 0 .1rem; font-size:clamp(24px,6.2vw,34px); line-height:1.05; font-family:"Marck Script","Lobster","Comfortaa",cursive; }
+  .revealText p{ margin:.15rem 0 0; font-size:clamp(16px,4.5vw,20px); line-height:1.3; }
+
+  .footer{ text-align:center; opacity:.65; font-size:14px; margin-top:6px; }
+  .btnBar{ display:flex; gap:12px; justify-content:center; margin-top:10px; }
+  .btn{
+    appearance:none; border:none; border-radius:12px; padding:10px 14px;
+    background:#111; color:#fff; font-weight:700; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.12);
+    font-family:"Comfortaa",system-ui,Segoe UI,Roboto,Arial;
+  }
+  .btn.secondary{ background:#eaeaea; color:#111; }
+  .btn:active{ transform:translateY(1px); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" id="card">
+      <div class="headline">
+       
+      </div>
+
+      <!-- Сърцето (scratch overlay) -->
+      <div class="heartBox" id="heartBox">
+        <canvas id="heart" aria-label="Scratchable golden heart"></canvas>
+      </div>
+
+      <!-- Празно (фонът е reveal изображението) -->
+
+      <!-- Текстът се появява след reveal -->
+      <div id="revealText" class="revealText">
+        <h2</h2>
+        <p> <strong></strong>!</p>
+      </div>
+
+      <div class="footer"></div>
+
+      <div class="btnBar">
+        <button class="btn secondary" id="btnReset" type="button"></button>
+        <button class="btn" id="btnReveal" type="button"></button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ====== Настройки – СМЕНИ ТУК ====== */
+/* Може да са URL-и или Base64 (data:image/...;base64,...) */
+const HEART_IMG  = 'gold-heart.jpg';  // изображение на златното сърце (overlay)
+const REVEAL_IMG = 'reveal.jpg';      // фон на картичката (ще се вижда през цялото време)
+/* =================================== */
+
+const IMAGE_ZOOM = 1.32;   // ↑ ако има тъмен кант по сърцето
+const HEART_FILL = 1;   // 0.99–1.00 – колко да е голямо сърцето в квадрата
+const AUTO_REVEAL_PERCENT = 70; // при 70% изтриване – показваме текста
+
+const card     = document.getElementById('card');
+const heartBox = document.getElementById('heartBox');
+const txt      = document.getElementById('revealText');
+const cvsHeart = document.getElementById('heart');
+const ctxH     = cvsHeart.getContext('2d', { willReadFrequently:true });
+ctxH.imageSmoothingEnabled = true; ctxH.imageSmoothingQuality = 'high';
+
+/* 1) REVEAL_IMG става фон на цялата картичка */
+card.style.backgroundImage = `url('${REVEAL_IMG}')`;
+
+let imgHeartOk=false, totalHeartPixels=0;
+const imgHeart = new Image();
+/* Ако пътят е грешен, въпреки това ще нарисуваме векторно златно сърце (fallback) */
+imgHeart.onload = ()=>{ imgHeartOk=true; sizeAll(); drawHeart(); computeHeartArea(); };
+imgHeart.onerror= ()=>{ imgHeartOk=false; sizeAll(); drawHeart(); computeHeartArea(); };
+imgHeart.src = HEART_IMG;
+
+function sizeAll(){
+  const bw = Math.max(1, Math.round(heartBox.clientWidth));
+  const bh = Math.max(1, Math.round(heartBox.clientHeight));
+  const dpr = window.devicePixelRatio || 1;
+  cvsHeart.width  = Math.round(bw * dpr);
+  cvsHeart.height = Math.round(bh * dpr);
+  cvsHeart.style.width  = bw + 'px';
+  cvsHeart.style.height = bh + 'px';
+}
+
+/* гарантирано първоначално рисуване, дори преди imgHeart.onload */
+function ensureFirstDraw(){
+  sizeAll();
+  drawHeart();
+  computeHeartArea();
+}
+document.addEventListener('DOMContentLoaded', ensureFirstDraw);
+new ResizeObserver(()=>{ sizeAll(); drawHeart(); }).observe(heartBox);
+
+function heartPath(ctx,w,h){
+  const s = Math.min(w,h) * 0.50 * HEART_FILL, x = w/2, y = h/2;
+  ctx.beginPath();
+  ctx.moveTo(x, y - s*0.10);
+  ctx.bezierCurveTo(x + s*0.95, y - s*0.78, x + s*0.98, y + s*0.75, x, y + s*0.98);
+  ctx.bezierCurveTo(x - s*0.98, y + s*0.75, x - s*0.95, y - s*0.78, x, y - s*0.10);
+  ctx.closePath();
+}
+
+function drawHeart(){
+  const w = cvsHeart.width, h = cvsHeart.height;
+  ctxH.clearRect(0,0,w,h);
+
+  // 1) рисуваме форма на сърце
+  heartPath(ctxH,w,h);
+
+  if(imgHeartOk){
+    // 2a) пълним със снимка на златно сърце
+    ctxH.save(); ctxH.clip();
+    const iw = imgHeart.naturalWidth, ih = imgHeart.naturalHeight;
+    const cover = Math.max(w/iw, h/ih) * IMAGE_ZOOM;
+    const dw = iw*cover, dh = ih*cover, dx = (w-dw)/2, dy = (h-dh)/2;
+    ctxH.drawImage(imgHeart, dx, dy, dw, dh);
+
+    // мек гланц
+    const grad = ctxH.createRadialGradient(w*0.55,h*0.24, w*0.06, w*0.55,h*0.24, Math.max(w,h)*0.65);
+    ctxH.globalCompositeOperation='soft-light';
+    grad.addColorStop(0,'rgba(255,255,255,.35)'); grad.addColorStop(1,'rgba(0,0,0,0)');
+    ctxH.fillStyle = grad; ctxH.fillRect(0,0,w,h);
+    ctxH.restore();
+  } else {
+    // 2b) FALLBACK – векторно „злато“, ако снимката липсва
+    const g = ctxH.createLinearGradient(0,0,0,h);
+    g.addColorStop(0,'#f7e799'); g.addColorStop(.35,'#e6c967'); g.addColorStop(.7,'#caa23b'); g.addColorStop(1,'#a77b21');
+    ctxH.fillStyle = g; ctxH.fill();
+  }
+
+  // 3) включваме режим за изтриване за следващите щрихи
+  ctxH.globalCompositeOperation='destination-out';
+}
+
+function computeHeartArea(){
+  try{
+    const {width:w,height:h} = cvsHeart;
+    const imgd = ctxH.getImageData(0,0,w,h);
+    let count=0; for(let i=3;i<imgd.data.length;i+=4) if(imgd.data[i]>0) count++;
+    totalHeartPixels = count || 1;
+  }catch(e){
+    totalHeartPixels = Math.round(cvsHeart.width * cvsHeart.height * 0.65);
+  }
+}
+
+/* Reveal / reset */
+function revealAll(){
+  cvsHeart.style.opacity='0';
+  cvsHeart.style.pointerEvents='none';
+  txt.classList.add('show');  // показваме текста долу
+}
+function resetHeart(){
+  cvsHeart.style.opacity='1';
+  cvsHeart.style.pointerEvents='auto';
+  txt.classList.remove('show');
+  sizeAll(); drawHeart(); computeHeartArea();
+}
+document.getElementById('btnReveal').addEventListener('click', revealAll);
+document.getElementById('btnReset').addEventListener('click', resetHeart);
+
+/* SCRATCH + авто-reveal при 70% */
+let drawing=false;
+const brush = ()=> Math.max(10, Math.round(cvsHeart.width*0.03));
+function getPointerPos(e){
+  const r = cvsHeart.getBoundingClientRect(), dpr=(window.devicePixelRatio||1);
+  return { x:(e.clientX - r.left)*dpr, y:(e.clientY - r.top)*dpr };
+}
+function scratchAt(x,y){
+  ctxH.globalCompositeOperation='destination-out';
+  ctxH.beginPath(); ctxH.arc(x,y,brush(),0,Math.PI*2); ctxH.fill();
+}
+function checkAutoReveal(){
+  try{
+    const w=cvsHeart.width,h=cvsHeart.height,imgd=ctxH.getImageData(0,0,w,h);
+    let remaining=0; for(let i=3;i<imgd.data.length;i+=4) if(imgd.data[i]>0) remaining++;
+    const cleared = Math.max(0, totalHeartPixels-remaining);
+    const pct = Math.round(cleared/totalHeartPixels*100);
+    if(pct>=AUTO_REVEAL_PERCENT) revealAll();
+  }catch(e){}
+}
+cvsHeart.addEventListener('pointerdown', e=>{drawing=true;cvsHeart.setPointerCapture?.(e.pointerId);const p=getPointerPos(e);scratchAt(p.x,p.y);checkAutoReveal();});
+cvsHeart.addEventListener('pointermove', e=>{if(!drawing)return;const p=getPointerPos(e);scratchAt(p.x,p.y);checkAutoReveal();});
+cvsHeart.addEventListener('pointerup',   e=>{drawing=false;try{cvsHeart.releasePointerCapture(e.pointerId);}catch(_){}}); 
+cvsHeart.addEventListener('pointercancel', ()=> drawing=false);
+
+/* Touch fallback за максимална съвместимост */
+function tPos(t){
+  const r=cvsHeart.getBoundingClientRect(), dpr=(window.devicePixelRatio||1);
+  return {x:(t.pageX-r.left-window.scrollX)*dpr, y:(t.pageY-r.top-window.scrollY)*dpr};
+}
+cvsHeart.addEventListener('touchstart',e=>{e.preventDefault();drawing=true;const p=tPos(e.touches[0]);scratchAt(p.x,p.y);checkAutoReveal();},{passive:false});
+cvsHeart.addEventListener('touchmove', e=>{if(!drawing)return;e.preventDefault();const p=tPos(e.touches[0]);scratchAt(p.x,p.y);checkAutoReveal();},{passive:false});
+cvsHeart.addEventListener('touchend',   ()=>{drawing=false;});
+cvsHeart.addEventListener('touchcancel',()=>{drawing=false;});
+</script>
+</body>
+</html>
